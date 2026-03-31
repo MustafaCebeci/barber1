@@ -1,0 +1,44 @@
+Bundan sonra yapılacaklar (unutmayalım diye checklist)
+A) OTP mantığı (statik endpointler)
+
+Branch account login (email+password)
+
+POST /auth/branch/login
+
+şifre doğruysa → OTP üret → otp_codes kaydet (60 sn) → mail at
+
+Branch account OTP verify
+
+POST /auth/branch/verify
+
+latest OTP’yi bul → used/expire/try_count kontrol → doğrula → used=1 → token/session üret
+
+Customer send code (SMS)
+
+POST /auth/customer/send-code
+
+phone’dan customer bul/yoksa oluştur (senin kararına göre)
+
+OTP üret → otp_codes kaydet (60 sn)
+
+sms_messages’a da log at (scheduled_at=NOW) + şimdilik console
+
+Customer verify
+
+POST /auth/customer/verify
+
+aynı verify kuralları → token/session
+
+B) Güvenlik ve kural seti
+
+OTP hashleme (sha256) ve düz kod saklamama
+
+try limit (örn 5) + cooldown (örn 30 sn’de 1 kod)
+
+“Tek aktif OTP” kuralı (yenisi gelince eskisini used yapma) — backend’de
+
+C) Temizlik / operasyon
+
+Expire olmuş OTP’leri periyodik temizleme (cron/job) (opsiyonel)
+
+sms_messages queued gönderim worker’ı (SMS servisi gelince)
