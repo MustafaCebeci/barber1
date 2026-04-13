@@ -839,7 +839,7 @@ const BookingControllers = {
         // branch doğrula
         // staff doğrula
         const [stRows] = await pool.execute(
-            `SELECT id, full_name, is_active FROM staff WHERE id = ? LIMIT 1`,
+            `SELECT id, name FROM service_providers WHERE id = ? LIMIT 1`,
             [staffId]
         );
         const st = stRows[0];
