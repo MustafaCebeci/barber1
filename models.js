@@ -1,6 +1,6 @@
 // models.js
 // Tüm tablolar için CRUD Model katmanı (mysql2/promise + namedPlaceholders)
-
+require("dotenv").config();
 const mysql = require("mysql2/promise");
 
 // ============ DB POOL ============

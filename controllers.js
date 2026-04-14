@@ -842,9 +842,8 @@ const BookingControllers = {
             `SELECT id, name FROM service_providers WHERE id = ? LIMIT 1`,
             [staffId]
         );
-        const st = stRows[0];
+        const st = stRows[0]; 
         if (!st) throw httpError(404, "Staff not found");
-        if (Number(st.is_active) === 0) throw httpError(400, "Staff inactive");
 
         // staff_services doğrula
         const provider = await ensureStaffProvider(staffId);
@@ -2476,19 +2475,15 @@ const BookingControllers = {
                 busySet.add(m);
             }
         }
-
         // 7. Server time for filtering past hours
         const now = new Date();
         const isToday = targetDate === now.toISOString().split("T")[0];
         const currentMin = isToday ? now.getHours() * 60 + now.getMinutes() : null;
-
         // 8. Generate available slots - service süresine göre
         const openMin = parseHHMMToMinutes(startHour);
         const closeMin = parseHHMMToMinutes(endHour);
         const maxDuration = Math.ceil(duration / step) * step;
-
         const availableSlots = [];
-
         // Service süresi kadar ilerleyerek slot üret
         for (let m = openMin; m + maxDuration <= closeMin; m += maxDuration) {
             // Skip past hours if today
@@ -2565,8 +2560,11 @@ const BookingControllers = {
             );
             let cancelDeadlineHours = 2;
             if (settingsRows.length > 0) {
-                const settings = JSON.parse(settingsRows[0].settings_json || "{}");
-                cancelDeadlineHours = settings.cancel_deadline_hours ?? 2;
+                let settingsJson = settingsRows[0]?.settings_json;
+                if (typeof settingsJson === "string") {
+                    try { settingsJson = JSON.parse(settingsJson); } catch { settingsJson = {}; }
+                }
+                cancelDeadlineHours = settingsJson?.cancel_deadline_hours ?? 2;
             }
 
             const hoursUntilAppt = (new Date(appt.start_at) - new Date()) / (1000 * 60 * 60);
