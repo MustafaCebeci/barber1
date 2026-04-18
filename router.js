@@ -17,6 +17,11 @@ router.post("/auth/logout", AuthControllers.logout);
 
 router.post("/appointments/book", BookingControllers.book);
 router.get("/appointments/stream", sseHandler);
+router.get("/appointments/test-stream", (req, res) => {
+	const { emitAppointment } = require("./sse");
+	emitAppointment({ test: true, time: Date.now() });
+	res.json({ ok: true, message: "Test event sent" });
+});
 router.post("/appointments/can-book", BookingControllers.canBook);
 router.post("/appointments/available-slots", BookingControllers.getAvailableSlots);
 router.post("/appointments/success-details", BookingControllers.successDetails);
@@ -27,6 +32,7 @@ router.get("/appointments/panel/:id", BookingControllers.panelGetById);
 router.post("/appointments/panel/create", BookingControllers.panelCreate);
 router.post("/appointments/panel/create-direct", BookingControllers.panelCreateDirect);
 router.post("/appointments/panel/status", BookingControllers.panelSetStatus);
+router.patch("/appointments/:id/status", BookingControllers.updateStatus);
 router.put("/appointments/:id", BookingControllers.appointmentUpdate);
 router.post("/customers/blacklist", BookingControllers.blacklistCustomer);
 router.get("/customers/blacklist", BookingControllers.blacklistList);

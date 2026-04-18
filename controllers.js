@@ -1226,11 +1226,6 @@ const BookingControllers = {
 
         const businessId = getPersonalBusinessId();
         const branchId = getPersonalBranchId();
-        const settingsJson = await getBusinessSettingsJson(businessId);
-        const businessName = settingsJson.business_name ?? settingsJson.businessName ?? null;
-        const businessSlug = settingsJson.business_slug ?? settingsJson.businessSlug ?? null;
-        const branchName = settingsJson.branch_name ?? settingsJson.branchName ?? null;
-        const branchPhone = settingsJson.branch_phone ?? settingsJson.branchPhone ?? null;
 
         // Admin değilse sadece kendi staff bilgisini al
         let staff = null;
@@ -1249,6 +1244,7 @@ const BookingControllers = {
             SELECT
                 a.id AS appointment_id,
                 a.provider_id,
+                sp.provider_type,
                 sp.staff_id AS staff_id,
                 a.service_id,
                 a.customer_id,
@@ -1285,42 +1281,25 @@ const BookingControllers = {
 
         const [rows] = await pool.execute(query, params);
 
-        const business = { id: businessId, name: businessName, slug: businessSlug };
-        const branch = { id: branchId, name: branchName, phone: branchPhone };
-
         const items = rows.map((row) => ({
-            appointment: {
-                id: row.appointment_id,
-                businessId,
-                branchId,
-                providerId: row.provider_id,
-                staffId: row.staff_id,
-                serviceId: row.service_id,
-                customerId: row.customer_id,
-                start_at: row.start_at,
-                end_at: row.end_at,
-                status: row.status,
-                customer_note: row.customer_note ?? null,
-                staff_note: row.staff_note ?? null,
-                created_at: row.created_at,
-                updated_at: row.updated_at,
-            },
-            business,
-            branch,
-            staff: staff ? staff : (row.staff_out_id ? { id: row.staff_out_id, full_name: row.staff_out_name } : null),
-            service: {
-                id: row.service_id,
-                name: row.service_name_snapshot,
-                duration_minutes: row.service_duration_minutes_snapshot,
-                price_cents: row.service_price_cents_snapshot,
-            },
-            customer: row.customer_id_out
-                ? {
-                    id: row.customer_id_out,
-                    display_name: row.customer_name,
-                    phone: row.customer_phone,
-                }
-                : null,
+            id: row.appointment_id,
+            serviceId: row.service_id,
+            providerId: row.provider_id,
+            staffId: row.staff_id,
+            customerId: row.customer_id,
+            title: row.service_name_snapshot,
+            customerName: row.customer_name,
+            providerType: row.provider_type,
+            staffName: row.staff_out_name || null,
+            start: row.start_at,
+            end: row.end_at,
+            status: row.status,
+            customerNote: row.customer_note ?? null,
+            staffNote: row.staff_note ?? null,
+            serviceDuration: row.service_duration_minutes_snapshot,
+            servicePrice: row.service_price_cents_snapshot,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
         }));
 
         return res.json({ ok: true, items });
@@ -1574,6 +1553,7 @@ const BookingControllers = {
         const body = req.body || {};
         const dateStr = String(body.date || "").trim();
         const timeStr = String(body.time || "").trim();
+        const endTimeStr = body.endTime ? String(body.endTime).trim() : null;
         const serviceId = body.serviceId ? Number(body.serviceId) : null;
         const requestedStaffIdRaw = body.staffId;
         const requestedStaffId = requestedStaffIdRaw ? Number(requestedStaffIdRaw) : null;
@@ -1582,7 +1562,7 @@ const BookingControllers = {
             throw httpError(400, "date ve time zorunlu (YYYY-MM-DD, HH:MM)");
         }
 
-        const startAt = toSqlDateTime(dateStr, timeStr);
+        let startAt = toSqlDateTime(dateStr, timeStr);
         if (!startAt) throw httpError(400, "Gecersiz date/time");
         const startMin = parseHHMMToMinutes(timeStr);
         if (startMin === null) throw httpError(400, "Invalid time format");
@@ -1603,7 +1583,7 @@ const BookingControllers = {
 
             // Get current appointment
             const [rows] = await conn.execute(
-                `SELECT id, provider_id, service_id, start_at, end_at, status
+                `SELECT id, customer_id, provider_id, service_id, start_at, end_at, status
                  FROM appointments WHERE id = ? LIMIT 1 FOR UPDATE`,
                 [appointmentId]
             );
@@ -1627,8 +1607,19 @@ const BookingControllers = {
             if (!svc) throw httpError(404, "Service not found");
 
             const durationMin = Number(svc.duration_minutes);
-            const blockDurationMin = roundUpToStep(durationMin, VIRTUAL_SLOT_MINUTES);
-            const endAt = new Date(new Date(startAt).getTime() + blockDurationMin * 60000);
+            let blockDurationMin = roundUpToStep(durationMin, VIRTUAL_SLOT_MINUTES);
+            let endAt;
+
+            // If endTime provided (from DND), calculate end from it
+            if (endTimeStr) {
+                // Parse "HH:MM" to Date object
+                const [endH, endM] = endTimeStr.split(":").map(Number);
+                const endDateObj = new Date(dateStr);
+                endDateObj.setHours(endH, endM, 0, 0);
+                endAt = endDateObj;
+            } else {
+                endAt = new Date(new Date(startAt).getTime() + blockDurationMin * 60000);
+            }
 
             // Check for conflicts (exclude current appointment)
             const [conflictRows] = await conn.execute(
@@ -1676,6 +1667,24 @@ const BookingControllers = {
             }
 
             await conn.commit();
+
+            // Müşteriye SMS ile bilgi ver
+            try {
+                const [cRows] = await pool.execute(
+                    `SELECT phone, display_name FROM customers WHERE id = ? LIMIT 1`,
+                    [ap.customer_id]
+                );
+                const customer = cRows[0];
+                if (customer?.phone) {
+                    const oldTime = new Date(ap.start_at).toLocaleString("tr-TR", { hour: "2-digit", minute: "2-digit" });
+                    const newTimeObj = new Date(startAt);
+                    const newTime = newTimeObj.toLocaleString("tr-TR", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" });
+                    const msg = `Randevunuz ${oldTime} yerine ${newTime} saatine taşılmıştır. Saygılarımızla.`;
+                    await sendSms({ phone: customer.phone, message: msg, type: "general" });
+                }
+            } catch (smsErr) {
+                console.error("SMS gönderim hatası:", smsErr);
+            }
 
             emitAppointment({
                 appointmentId,
@@ -2602,6 +2611,55 @@ const BookingControllers = {
         } catch (err) {
             await conn.rollback();
             throw err;
+        } finally {
+            conn.release();
+        }
+    }),
+
+    updateStatus: asyncWrap(async (req, res) => {
+        const decoded = requireUser(req);
+        const staffId = decoded.staff_id ?? decoded.staffId ?? null;
+        if (!staffId) throw httpError(403, "staff_id missing");
+
+        const appointmentId = Number(req.params.id);
+        if (!appointmentId || Number.isNaN(appointmentId)) {
+            throw httpError(400, "appointmentId zorunlu");
+        }
+
+        const { status } = req.body || {};
+        const allowed = ["confirmed", "no_show", "completed", "cancelled"];
+        if (!status || !allowed.includes(status)) {
+            throw httpError(400, "Gecersiz status");
+        }
+
+        const conn = await pool.getConnection();
+        try {
+            const [rows] = await conn.execute(
+                `SELECT id, provider_id, start_at, status FROM appointments WHERE id = ?`,
+                [appointmentId]
+            );
+            const ap = rows[0];
+            if (!ap) throw httpError(404, "Appointment not found");
+
+            const oldStatus = ap.status;
+            if (oldStatus !== status) {
+                await conn.execute(
+                    `UPDATE appointments SET status = ?, updated_at = NOW() WHERE id = ?`,
+                    [status, appointmentId]
+                );
+                await conn.execute(
+                    `INSERT INTO appointment_status_history (appointment_id, old_status, new_status, changed_by, note) VALUES (?, ?, ?, 'staff', NULL)`,
+                    [appointmentId, oldStatus, status]
+                );
+                // Emit SSE event
+                emitAppointment({
+                    appointmentId,
+                    providerId: ap.provider_id,
+                    start_at: ap.start_at,
+                    status,
+                });
+            }
+            return res.json({ ok: true });
         } finally {
             conn.release();
         }

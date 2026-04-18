@@ -116,7 +116,7 @@ app.use((req, res, next) => {
     if (publicApi.has(pathname)) return next();
     const decoded = readJwt(req);
     if (!decoded) return res.status(401).json({ ok: false, message: "Unauthenticated" });
-    if (pathname === "/api/appointments/stream" && decoded.typ !== "user") {
+    if (pathname === "/api/appointments/stream" && decoded.typ !== "user" && decoded.typ !== "barber") {
       return res.status(403).json({ ok: false, message: "Forbidden" });
     }
     return next();
